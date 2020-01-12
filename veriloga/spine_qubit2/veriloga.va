@@ -1,0 +1,168 @@
+// Author: J.P.G. van Dijk
+`include "constants.vams"
+`include "disciplines.vams"
+
+module spine_qubit2(init, signal_a, signal_b, t0, e, Ureal, Uimag);
+
+// Inputs/outputs
+input init, signal_a, signal_b, t0, e;
+electrical init, signal_a, signal_b, t0, e;
+output [0:35] Ureal;
+output [0:35] Uimag;
+electrical [0:35] Ureal;
+electrical [0:35] Uimag;
+
+// Parameters
+parameter real Ec = 1e12 from [0:inf);
+parameter real f0a = 1e9 from [0:inf);
+parameter real f0b = 1e9 from [0:inf);
+parameter real fRa = 10e6 from [0:inf);
+parameter real fRb = 10e6 from [0:inf);
+parameter real alpha = 100e9 from [0:inf);
+parameter real beta = 1e9 from [0:inf);
+parameter integer scaling = 4 from [0:10];
+parameter integer accuracy = 10 from [1:25];
+
+// Internal variables
+real f0;
+real t_old;
+real dt;
+real H[0:35];
+real dU[0:71];
+real U[0:71];
+real matrix_small[0:71];
+real matrix_power[0:71];
+real factorial;
+real tmp[0:71];
+
+integer i, j, k, l;
+genvar g;
+
+analog begin
+
+	@(initial_step or cross(V(init) - 0.5, 0)) begin
+		f0 = max(f0a, f0b);
+		t_old = $abstime;
+
+		// Start from the identity operation
+		for (i = 0; i < 72; i = i + 1)
+			U[i] = 0;
+		for (i = 0; i < 72; i = i + 14)
+			U[i] = 1;
+
+		// Clear the Hamiltonian
+		for (i = 0; i < 36; i = i + 1)
+			H[i] = 0;
+
+	end
+
+	if (V(init) < 0.5) begin
+
+	// Determine the elapsed time
+	dt = $abstime - t_old;
+	t_old = $abstime;
+
+	// Update the Hamiltonian
+	H[1] = `M_TWO_PI * fRa * -dt * V(signal_a);
+	H[6] = H[1];
+	H[15] = H[1];
+	H[20] = H[1];
+	H[2] = `M_TWO_PI * fRb * -dt * V(signal_b);
+	H[9] = H[2];
+	H[12] = H[2];
+	H[19] = H[2];
+	H[0] = `M_TWO_PI * -(f0a + f0b) / 2.0 * -dt;
+	H[21] = -H[0];
+	H[7] = `M_TWO_PI * (f0b - f0a) / 2.0 * -dt;
+	H[14] = -H[7];
+	H[10] = `M_TWO_PI * beta * V(t0) * -dt;
+	H[11] = H[10];
+	H[16] = -H[10];
+	H[17] = -H[10];
+	H[25] = H[10];
+	H[26] = -H[10];
+	H[31] = H[10];
+	H[32] = -H[10];
+	H[28] = `M_TWO_PI * (Ec - alpha * V(e)) * -dt;
+	H[35] = `M_TWO_PI * (Ec + alpha * V(e)) * -dt;
+
+	// Scale the matrix for more accurate calculations
+	for (i = 0; i < 36; i = i + 1) begin
+		matrix_small[2*i] = 0;
+		matrix_small[2*i+1] = H[i] / pow(2, scaling);
+		matrix_power[2*i] = matrix_small[2*i];
+		matrix_power[2*i+1] = matrix_small[2*i+1];
+	end
+
+	// Exponentiation using series expansion: exp(z) = I + Z^k / k!, k = 1...accuracy
+	factorial = 1.0;
+	for (i = 0; i < 72; i = i + 1)
+		dU[i] = 0;
+	for (i = 0; i < 72; i = i + 14)
+		dU[i] = 1;
+	for (k = 1; k < accuracy; k = k + 1) begin
+		factorial = factorial * k;
+		for (i = 0; i < 72; i = i + 1) begin
+			dU[i] = dU[i] + matrix_power[i] / factorial;
+		end
+		if ((k + 1) < accuracy) begin
+			for (i = 0; i < 72; i = i + 1) begin
+				tmp[i] = matrix_power[i];
+				matrix_power[i] = 0;
+			end
+			for (i = 0; i < 6; i = i + 1) begin
+				for (j = 0; j < 6; j = j + 1) begin
+					for (l = 0; l < 6; l = l + 1) begin
+						matrix_power[2*(j+6*i)+0] = matrix_power[2*(j+6*i)+0] + matrix_small[2*(l+6*i)+0] * tmp[2*(j+6*l)+0] - matrix_small[2*(l+6*i)+1] * tmp[2*(j+6*l)+1];
+						matrix_power[2*(j+6*i)+1] = matrix_power[2*(j+6*i)+1] + matrix_small[2*(l+6*i)+0] * tmp[2*(j+6*l)+1] + matrix_small[2*(l+6*i)+1] * tmp[2*(j+6*l)+0];
+					end
+				end
+			end
+		end
+	end
+
+	// Scale back by squaring
+	for (k = 0; k < scaling; k = k + 1) begin
+		for (i = 0; i < 72; i = i + 1) begin
+			tmp[i] = dU[i];
+			dU[i] = 0;
+		end
+		for (i = 0; i < 6; i = i + 1) begin
+			for (j = 0; j < 6; j = j + 1) begin
+				for (l = 0; l < 6; l = l + 1) begin
+					dU[2*(j+6*i)+0] = dU[2*(j+6*i)+0] + tmp[2*(l+6*i)+0] * tmp[2*(j+6*l)+0] - tmp[2*(l+6*i)+1] * tmp[2*(j+6*l)+1];
+					dU[2*(j+6*i)+1] = dU[2*(j+6*i)+1] + tmp[2*(l+6*i)+0] * tmp[2*(j+6*l)+1] + tmp[2*(l+6*i)+1] * tmp[2*(j+6*l)+0];
+				end
+			end
+		end
+
+	end
+
+	// Update the unitary operation
+	for (i = 0; i < 72; i = i + 1) begin
+		tmp[i] = U[i];
+		U[i] = 0;
+	end
+	for (i = 0; i < 6; i = i + 1) begin
+		for (j = 0; j < 6; j = j + 1) begin
+			for (l = 0; l < 6; l = l + 1) begin
+				U[2*(j+6*i)+0] = U[2*(j+6*i)+0] + dU[2*(l+6*i)+0] * tmp[2*(j+6*l)+0] - dU[2*(l+6*i)+1] * tmp[2*(j+6*l)+1];
+				U[2*(j+6*i)+1] = U[2*(j+6*i)+1] + dU[2*(l+6*i)+0] * tmp[2*(j+6*l)+1] + dU[2*(l+6*i)+1] * tmp[2*(j+6*l)+0];
+			end
+		end
+	end
+
+	// Simulate at least 20 points per Larmor precession
+	$bound_step(0.05/f0);
+
+	end
+
+	// Output the unitary matrix elements
+	for (g = 0; g < 36; g = g + 1) begin
+		V(Ureal[g]) <+ transition(U[2*g+0], 0, 0);
+		V(Uimag[g]) <+ transition(U[2*g+1], 0, 0);
+	end
+
+end
+
+endmodule

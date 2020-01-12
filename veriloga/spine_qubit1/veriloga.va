@@ -1,0 +1,133 @@
+// Author: J.P.G. van Dijk
+`include "constants.vams"
+`include "disciplines.vams"
+
+module spine_qubit1(signal, Ureal, Uimag);
+
+// The signal applied to the qubits
+input signal;
+
+electrical signal;
+
+// The measurement probabilities
+output [0:3] Ureal;
+output [0:3] Uimag;
+
+electrical [0:3] Ureal;
+electrical [0:3] Uimag;
+
+// The qubit properties
+parameter real f0 = 1e9 from [0:inf);
+parameter real fR = 1e6 from [0:inf);
+
+// Internal variables
+real t_old;
+real dt;
+real a;
+real b;
+real tmp;
+real U0r;
+real U0i;
+real U1r;
+real U1i;
+real U2r;
+real U2i;
+real U3r;
+real U3i;
+real dU0r;
+real dU0i;
+real dU1r;
+real dU1i;
+real dU2r;
+real dU2i;
+real dU3r;
+real dU3i;
+real U0r_new;
+real U0i_new;
+real U1r_new;
+real U1i_new;
+real U2r_new;
+real U2i_new;
+real U3r_new;
+real U3i_new;
+real outPx;
+real outPy;
+real outPz;
+
+analog begin
+
+	@(initial_step) begin
+		t_old = $abstime;
+
+		// Start from the identity operation
+		U0r = 1.0;
+		U0i = 0.0;
+		U1r = 0.0;
+		U1i = 0.0;
+		U2r = 0.0;
+		U2i = 0.0;
+		U3r = 1.0;
+		U3i = 0.0;
+	end
+
+	// Determine the elapsed time
+	dt = $abstime - t_old;
+	t_old = $abstime;
+
+	// Set the Hamiltonian elements
+	a = -dt * `M_TWO_PI * f0 / 2.0;
+	b = -dt * `M_TWO_PI * fR * V(signal);
+
+	// Calculate dU = expm(-i * dt * H)
+	tmp = sqrt(pow(a, 2) + pow(b, 2));
+	dU0r = cos(tmp);
+	dU0i = a / tmp * sin(tmp);
+	dU1r = 0;
+	dU1i = b / tmp * sin(tmp);
+	dU2r = 0;
+	dU2i = b / tmp * sin(tmp);
+	dU3r = cos(tmp);
+	dU3i = -a / tmp * sin(tmp);
+
+	// Calculate U = dU * U
+	U0r_new = -dU0i * U0i + dU0r * U0r - dU1i * U2i + dU1r * U2r;
+	U0i_new = dU0r * U0i + dU0i * U0r + dU1r * U2i + dU1i * U2r;
+	U1r_new = -dU0i * U1i + dU0r * U1r - dU1i * U3i + dU1r * U3r;
+	U1i_new = dU0r * U1i + dU0i * U1r + dU1r * U3i + dU1i * U3r;
+	U2r_new = -dU2i * U0i + dU2r * U0r - dU3i * U2i + dU3r * U2r;
+	U2i_new = dU2r * U0i + dU2i * U0r + dU3r * U2i + dU3i * U2r;
+	U3r_new = -dU2i * U1i + dU2r * U1r - dU3i * U3i + dU3r * U3r;
+	U3i_new = dU2r * U1i + dU2i * U1r + dU3r * U3i + dU3i * U3r;
+	U0r = U0r_new;
+	U0i = U0i_new;
+	U1r = U1r_new;
+	U1i = U1i_new;
+	U2r = U2r_new;
+	U2i = U2i_new;
+	U3r = U3r_new;
+	U3i = U3i_new;
+
+	// Determine the qubit state assuming an initialized state |0>
+	//outPx = (pow(U0r + U2r, 2) + pow(U0i + U2i, 2)) / 2.0;
+	//outPy = (pow(U0r - U2i, 2) + pow(U0i + U2r, 2)) / 2.0;
+	//outPz = pow(U0r, 2) + pow(U0i, 2);
+
+	// Output the qubit state as the measurement probabilities along the different measurement bases
+	//V(Px) <+ transition(outPx, 0, 0);
+	//V(Py) <+ transition(outPy, 0, 0);
+	//V(Pz) <+ transition(outPz, 0, 0);
+	V(Ureal[0]) <+ transition(U0r, 0, 0);
+	V(Ureal[1]) <+ transition(U1r, 0, 0);
+	V(Ureal[2]) <+ transition(U2r, 0, 0);
+	V(Ureal[3]) <+ transition(U3r, 0, 0);
+	V(Uimag[0]) <+ transition(U0i, 0, 0);
+	V(Uimag[1]) <+ transition(U1i, 0, 0);
+	V(Uimag[2]) <+ transition(U2i, 0, 0);
+	V(Uimag[3]) <+ transition(U3i, 0, 0);
+
+	// Simulate at least 20 points per Larmor precession
+	$bound_step(0.05/f0);
+
+end
+
+endmodule
